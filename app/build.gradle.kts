@@ -18,7 +18,7 @@ android {
     }
 
     // CI signing: set when the keystore + passwords are provided via env (GitHub Secrets).
-    val ciKeystore = System.getenv("BUNC_KEYSTORE")
+    val ciKeystore = System.getenv("BUNC_KEYSTORE")?.takeIf { it.isNotBlank() }
     val hasCiKeystore = ciKeystore != null && file(ciKeystore).exists()
     signingConfigs {
         if (hasCiKeystore) {
