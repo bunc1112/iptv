@@ -12,13 +12,28 @@ android {
         applicationId = "com.bunc.tv"
         minSdk = 21
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = (System.getenv("BUNC_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("BUNC_VERSION_NAME") ?: "1.0"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    // CI signing: set when the keystore + passwords are provided via env (GitHub Secrets).
+    val ciKeystore = System.getenv("BUNC_KEYSTORE")
+    val hasCiKeystore = ciKeystore != null && file(ciKeystore).exists()
+    signingConfigs {
+        if (hasCiKeystore) {
+            create("release") {
+                storeFile = file(ciKeystore!!)
+                storePassword = System.getenv("BUNC_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("BUNC_KEY_ALIAS")
+                keyPassword = System.getenv("BUNC_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (hasCiKeystore) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
