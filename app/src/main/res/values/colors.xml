@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bunc_navy_top">#0E1634</color>
+    <color name="bunc_navy">#121C3C</color>
+    <color name="bunc_navy_deep">#0A1130</color>
+    <color name="bunc_gold">#FFB63C</color>
+    <color name="bunc_cyan">#5FCDFF</color>
+    <color name="bunc_orange">#FF8A3C</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+</resources>

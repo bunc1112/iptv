@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base platform theme; the actual UI colors come from the Compose theme. -->
+    <style name="Theme.Bunc" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bunc_navy_deep</item>
+        <item name="android:statusBarColor">@color/bunc_navy_deep</item>
+        <item name="android:navigationBarColor">@color/bunc_navy_deep</item>
+    </style>
+</resources>
