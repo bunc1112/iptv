@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:padding="4dp">
+        <EditText android:id="@+id/url" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:hint="https://your-app.test"
+            android:inputType="textUri" android:imeOptions="actionGo" android:singleLine="true" />
+        <Button android:id="@+id/go" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="Go" />
+        <Button android:id="@+id/newId" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="New user" />
+    </LinearLayout>
+    <TextView android:id="@+id/info" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:paddingHorizontal="8dp"
+        android:textSize="11sp" />
+    <WebView android:id="@+id/web" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1" />
+</LinearLayout>
