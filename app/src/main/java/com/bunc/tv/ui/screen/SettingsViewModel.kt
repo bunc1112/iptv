@@ -61,7 +61,7 @@ class SettingsViewModel : ViewModel() {
         else -> serverOrder
     }
 
-    fun setMode(m: String) {
+    fun chooseMode(m: String) {
         viewModelScope.launch {
             // Switching to custom starts from whatever order is on screen now.
             val current = folders

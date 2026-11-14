@@ -72,9 +72,9 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
             Text("Sort folders by", color = BuncTextDim, fontSize = 13.sp)
             Spacer(Modifier.height(6.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Provider order", vm.mode == FolderOrder.SERVER) { vm.setMode(FolderOrder.SERVER) }
-                Chip("A–Z", vm.mode == FolderOrder.AZ) { vm.setMode(FolderOrder.AZ) }
-                Chip("My order (1, 2, 3…)", custom) { vm.setMode(FolderOrder.CUSTOM) }
+                Chip("Provider order", vm.mode == FolderOrder.SERVER) { vm.chooseMode(FolderOrder.SERVER) }
+                Chip("A–Z", vm.mode == FolderOrder.AZ) { vm.chooseMode(FolderOrder.AZ) }
+                Chip("My order (1, 2, 3…)", custom) { vm.chooseMode(FolderOrder.CUSTOM) }
             }
         }
 
