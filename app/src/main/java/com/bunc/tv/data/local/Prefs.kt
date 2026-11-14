@@ -71,4 +71,30 @@ class Prefs(private val context: Context) {
     }
 
     suspend fun getLast(): String? = context.dataStore.data.first()[Keys.LAST]
+
+    // ---------- Folder (category) sorting, saved per profile + section ----------
+    // mode: "server" (as the provider sends it), "az" (alphabetical), "custom" (your own numbered order)
+
+    private fun sortKey(profile: String, section: String) = stringPreferencesKey("sort_${profile}_$section")
+    private fun orderKey(profile: String, section: String) = stringPreferencesKey("order_${profile}_$section")
+
+    suspend fun getSortMode(profile: String, section: String): String =
+        context.dataStore.data.first()[sortKey(profile, section)] ?: "server"
+
+    suspend fun setSortMode(profile: String, section: String, mode: String) {
+        context.dataStore.edit { it[sortKey(profile, section)] = mode }
+    }
+
+    suspend fun getCustomOrder(profile: String, section: String): List<String> {
+        val json = context.dataStore.data.first()[orderKey(profile, section)] ?: return emptyList()
+        return try {
+            gson.fromJson(json, Array<String>::class.java)?.toList() ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun setCustomOrder(profile: String, section: String, ids: List<String>) {
+        context.dataStore.edit { it[orderKey(profile, section)] = gson.toJson(ids) }
+    }
 }

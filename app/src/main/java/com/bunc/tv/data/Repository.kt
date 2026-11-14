@@ -24,9 +24,10 @@ object Repository {
     private var m3uChannels: List<M3uChannel> = emptyList()
 
     // Session caches so revisiting a section/category is instant (no re-fetch).
-    private val catCache = HashMap<Section, List<Category>>()
-    private val contentCache = HashMap<String, List<Content>>()
-    private val episodeCache = HashMap<Int, List<Episode>>()
+    // Thread-safe: search loads Live, Movies and Series in parallel.
+    private val catCache = java.util.concurrent.ConcurrentHashMap<Section, List<Category>>()
+    private val contentCache = java.util.concurrent.ConcurrentHashMap<String, List<Content>>()
+    private val episodeCache = java.util.concurrent.ConcurrentHashMap<Int, List<Episode>>()
 
     val isM3u: Boolean get() = account is Account.M3u
 

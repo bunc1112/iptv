@@ -20,6 +20,8 @@ import com.bunc.tv.ui.screen.HomeScreen
 import com.bunc.tv.ui.screen.LoginScreen
 import com.bunc.tv.ui.screen.PlayerScreen
 import com.bunc.tv.ui.screen.ProfilesScreen
+import com.bunc.tv.ui.screen.SearchScreen
+import com.bunc.tv.ui.screen.SettingsScreen
 import com.bunc.tv.ui.screen.SplashScreen
 
 object Routes {
@@ -28,6 +30,8 @@ object Routes {
     const val HOME = "home"
     const val PLAYER = "player"
     const val EPISODES = "episodes"
+    const val SEARCH = "search"
+    const val SETTINGS = "settings"
 }
 
 @Composable
@@ -87,8 +91,31 @@ fun BuncRoot() {
                     nav.navigate(Routes.PROFILES) {
                         popUpTo(Routes.HOME) { inclusive = true }
                     }
+                },
+                onSearch = { nav.navigate(Routes.SEARCH) },
+                onSettings = { nav.navigate(Routes.SETTINGS) }
+            )
+        }
+
+        composable(Routes.SEARCH) {
+            SearchScreen(
+                onPlay = { url, title ->
+                    PlaybackQueue.setSingle(url, title)
+                    nav.navigate(Routes.PLAYER)
+                },
+                onPlayList = { list, startIndex ->
+                    PlaybackQueue.setList(list, startIndex)
+                    nav.navigate(Routes.PLAYER)
+                },
+                onOpenSeries = { seriesId, title ->
+                    NavState.seriesTitle = title
+                    nav.navigate("${Routes.EPISODES}/$seriesId")
                 }
             )
+        }
+
+        composable(Routes.SETTINGS) {
+            SettingsScreen()
         }
 
         composable(

@@ -18,6 +18,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.runtime.LaunchedEffect
+import com.bunc.tv.data.FolderOrder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,8 +51,15 @@ fun HomeScreen(
     onPlayList: (List<com.bunc.tv.data.PlaybackQueue.Item>, Int) -> Unit,
     onOpenSeries: (Int, String) -> Unit,
     onLogout: () -> Unit,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
     vm: HomeViewModel = viewModel()
 ) {
+    // Re-sort folders when the sorting settings change.
+    LaunchedEffect(FolderOrder.version) {
+        if (FolderOrder.version > 0) vm.reorder()
+    }
+
     // Responsive sizing: phones get fewer, bigger tiles; TV/large screens get more.
     val widthDp = LocalConfiguration.current.screenWidthDp
     val isWide = widthDp >= 600
@@ -65,6 +77,8 @@ fun HomeScreen(
             sections = vm.sections,
             current = vm.section,
             onSection = { vm.selectSection(it) },
+            onSearch = onSearch,
+            onSettings = onSettings,
             onLogout = { vm.switchProfile(onLogout) }
         )
 
@@ -131,6 +145,8 @@ private fun TopBar(
     sections: List<Section>,
     current: Section,
     onSection: (Section) -> Unit,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
     onLogout: () -> Unit
 ) {
     Row(
@@ -155,8 +171,11 @@ private fun TopBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             sections.forEach { s -> SectionTab(s.label(), s == current) { onSection(s) } }
+            IconTab(Icons.Filled.Search, "Search", onSearch)
         }
         Spacer(Modifier.width(10.dp))
+        IconButtonBox(Icons.Filled.Settings, "Settings", onSettings)
+        Spacer(Modifier.width(8.dp))
         LogoutButton(onLogout)
     }
 }
@@ -182,6 +201,39 @@ private fun SectionTab(label: String, selected: Boolean, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 8.dp)
     )
+}
+
+@Composable
+private fun IconTab(icon: ImageVector, label: String, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (focused) BuncCyan else BuncNavyTop)
+            .onFocusChangedCompat { focused = it }
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = if (focused) BuncNavyDeep else BuncGold, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = if (focused) BuncNavyDeep else BuncText, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
+@Composable
+private fun IconButtonBox(icon: ImageVector, description: String, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (focused) BuncGold else BuncNavyTop)
+            .onFocusChangedCompat { focused = it }
+            .clickable { onClick() }
+            .padding(10.dp)
+    ) {
+        Icon(icon, contentDescription = description, tint = if (focused) BuncNavyDeep else BuncText)
+    }
 }
 
 @Composable

@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bunc.tv.data.FolderOrder
 import com.bunc.tv.data.ServiceLocator
 import com.bunc.tv.data.model.Category
 import com.bunc.tv.data.model.Content
@@ -50,12 +51,23 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             error = null
             categories = try {
-                repo.categories(section)
+                FolderOrder.apply(section, repo.categories(section))
             } catch (e: Exception) {
                 error = e.message; emptyList()
             }
             selectedCategory = categories.firstOrNull()?.id ?: ""
             loadContent()
+        }
+    }
+
+    /** Re-sort the folder list after the sorting settings changed; keeps the current selection. */
+    fun reorder() {
+        viewModelScope.launch {
+            categories = try {
+                FolderOrder.apply(section, repo.categories(section))
+            } catch (e: Exception) {
+                categories
+            }
         }
     }
 
