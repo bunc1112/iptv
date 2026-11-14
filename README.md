@@ -21,15 +21,3 @@
 Every push to the `freshbrowser` branch builds the app automatically with GitHub Actions.
 Get it from **Releases → FreshBrowser latest build → app-debug.apk**, open it on your
 phone and allow "install unknown apps".
-
-## iPhone version (`ios/` folder)
-GitHub builds an **unsigned** `.ipa` on every change to `ios/`:
-Releases → FreshBrowser iOS latest build → FreshBrowser-unsigned.ipa.
-
-Apple only installs signed apps, so sign it on install with one of:
-- **Sideloadly** or **AltStore** (Windows/Mac) + free Apple ID —
-  works, but the app expires after 7 days (just re-install).
-- A paid Apple Developer account ($99/yr) — lasts 1 year.
-
-Each "New user" uses a fresh in-memory WebKit data store (cookies,
-storage, cache) + random User-Agent/language. IP is not changed.
