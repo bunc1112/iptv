@@ -20,7 +20,13 @@ object ServiceLocator {
  * without leaving the player. For movies/episodes the list has a single item.
  */
 object PlaybackQueue {
-    data class Item(val title: String, val url: String)
+    /** streamId is set for Xtream live channels (used for the EPG); logo is shown in the guide. */
+    data class Item(
+        val title: String,
+        val url: String,
+        val streamId: Int? = null,
+        val logo: String? = null
+    )
 
     @Volatile var items: List<Item> = emptyList()
     @Volatile var index: Int = 0
@@ -45,4 +51,8 @@ object PlaybackQueue {
 /** Carries the series title into the Episodes screen without stuffing it in a route. */
 object NavState {
     @Volatile var seriesTitle: String = ""
+
+    /** Channels the TV Guide should show (empty = all live channels) and which one to start on. */
+    @Volatile var guideChannels: List<PlaybackQueue.Item> = emptyList()
+    @Volatile var guideStart: Int = 0
 }

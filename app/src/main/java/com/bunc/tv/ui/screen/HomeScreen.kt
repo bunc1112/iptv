@@ -23,6 +23,11 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.LaunchedEffect
 import com.bunc.tv.data.FolderOrder
+import com.bunc.tv.data.NavState
+import com.bunc.tv.data.PlaybackQueue
+import com.bunc.tv.data.ServiceLocator
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +58,7 @@ fun HomeScreen(
     onLogout: () -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
+    onGuide: () -> Unit,
     vm: HomeViewModel = viewModel()
 ) {
     // Re-sort folders when the sorting settings change.
@@ -79,6 +85,15 @@ fun HomeScreen(
             onSection = { vm.selectSection(it) },
             onSearch = onSearch,
             onSettings = onSettings,
+            onGuide = if (ServiceLocator.repo.hasEpg) {
+                {
+                    // Guide shows the folder you're in on Live TV; otherwise all channels.
+                    NavState.guideChannels =
+                        if (vm.section == Section.LIVE) vm.content.map { liveItem(vm, it) } else emptyList()
+                    NavState.guideStart = 0
+                    onGuide()
+                }
+            } else null,
             onLogout = { vm.switchProfile(onLogout) }
         )
 
@@ -112,6 +127,7 @@ fun HomeScreen(
                             items = vm.content,
                             columns = if (live) liveCols else vodCols,
                             isLive = live,
+                            showNow = live && ServiceLocator.repo.hasEpg,
                             onClick = { c -> handleClick(vm, c, onPlay, onPlayList, onOpenSeries) }
                         )
                     }
@@ -120,6 +136,13 @@ fun HomeScreen(
         }
     }
 }
+
+private fun liveItem(vm: HomeViewModel, c: Content) = PlaybackQueue.Item(
+    title = c.name,
+    url = vm.liveUrl(c),
+    streamId = if (vm.isM3u) null else c.id,
+    logo = c.logo
+)
 
 private fun handleClick(
     vm: HomeViewModel,
@@ -131,7 +154,7 @@ private fun handleClick(
     when (c.section) {
         Section.LIVE -> {
             // Hand the whole channel list to the player so Up/Down zaps channels.
-            val list = vm.content.map { com.bunc.tv.data.PlaybackQueue.Item(it.name, vm.liveUrl(it)) }
+            val list = vm.content.map { liveItem(vm, it) }
             val start = vm.content.indexOf(c).coerceAtLeast(0)
             onPlayList(list, start)
         }
@@ -147,6 +170,7 @@ private fun TopBar(
     onSection: (Section) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
+    onGuide: (() -> Unit)?,
     onLogout: () -> Unit
 ) {
     Row(
@@ -172,6 +196,7 @@ private fun TopBar(
         ) {
             sections.forEach { s -> SectionTab(s.label(), s == current) { onSection(s) } }
             IconTab(Icons.Filled.Search, "Search", onSearch)
+            if (onGuide != null) IconTab(Icons.Filled.DateRange, "TV Guide", onGuide)
         }
         Spacer(Modifier.width(10.dp))
         IconButtonBox(Icons.Filled.Settings, "Settings", onSettings)
@@ -301,6 +326,7 @@ private fun ContentGrid(
     items: List<Content>,
     columns: Int,
     isLive: Boolean,
+    showNow: Boolean,
     onClick: (Content) -> Unit
 ) {
     LazyVerticalGrid(
@@ -308,12 +334,19 @@ private fun ContentGrid(
         modifier = Modifier.fillMaxSize().padding(10.dp)
     ) {
         items(items, key = { "${it.section}-${it.id}" }) { c ->
+            // What's on now — loaded only for tiles that are on screen, and cached.
+            val now = if (showNow) {
+                produceState<String?>(null, c.id) {
+                    value = runCatching { ServiceLocator.repo.nowPlaying(c.id)?.title }.getOrNull()
+                }.value
+            } else null
             ContentCard(
                 title = c.name,
                 imageUrl = c.logo,
                 onClick = { onClick(c) },
                 posterAspect = if (isLive) 16f / 9f else 2f / 3f,
-                fitImage = isLive
+                fitImage = isLive,
+                subtitle = now
             )
         }
     }

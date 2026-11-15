@@ -149,7 +149,9 @@ fun SearchScreen(
                     }
 
                     section("Live TV", vm.live, true, "l") { c ->
-                        val items = vm.live.map { PlaybackQueue.Item(it.name, vm.liveUrl(it)) }
+                        val items = vm.live.map {
+                            PlaybackQueue.Item(it.name, vm.liveUrl(it), if (vm.isM3u) null else it.id, it.logo)
+                        }
                         onPlayList(items, vm.live.indexOf(c).coerceAtLeast(0))
                     }
                     section("Movies", vm.movies, false, "m") { c -> onPlay(vm.movieUrl(c), c.name) }

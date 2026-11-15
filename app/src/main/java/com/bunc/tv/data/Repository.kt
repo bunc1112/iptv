@@ -7,6 +7,8 @@ import com.bunc.tv.data.remote.M3uChannel
 import com.bunc.tv.data.remote.M3uParser
 import com.bunc.tv.data.remote.XtreamApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 
@@ -29,10 +31,20 @@ object Repository {
     private val contentCache = java.util.concurrent.ConcurrentHashMap<String, List<Content>>()
     private val episodeCache = java.util.concurrent.ConcurrentHashMap<Int, List<Episode>>()
 
+    // EPG caches: streamId -> (valid until, programmes)
+    private val nowCache = java.util.concurrent.ConcurrentHashMap<Int, Pair<Long, List<Program>>>()
+    private val fullEpgCache = java.util.concurrent.ConcurrentHashMap<Int, Pair<Long, List<Program>>>()
+    // Many tiles ask for "now playing" at once; don't flood the provider.
+    private val epgLimiter = Semaphore(6)
+
+    /** EPG is available for Xtream accounts (M3U playlists carry no per-channel EPG API). */
+    val hasEpg: Boolean get() = account is Account.Xtream
+
     val isM3u: Boolean get() = account is Account.M3u
 
     private fun clearCaches() {
         catCache.clear(); contentCache.clear(); episodeCache.clear()
+        nowCache.clear(); fullEpgCache.clear()
     }
 
     fun reset() {
@@ -197,6 +209,110 @@ object Repository {
             el.isJsonObject -> el.asJsonObject.entrySet().flatMap { many(it.value) }
             el.isJsonArray -> el.asJsonArray.flatMap { many(it) }
             else -> emptyList()
+        }
+    }
+
+    // ----------  EPG  ----------
+
+    /** The current programme and the next couple after it (empty if the channel has no EPG). */
+    suspend fun nowNext(streamId: Int): List<Program> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        nowCache[streamId]?.let { (until, list) -> if (until > now) return@withContext list }
+        val a = account as? Account.Xtream ?: return@withContext emptyList()
+        val svc = api ?: return@withContext emptyList()
+        val list = try {
+            epgLimiter.withPermit {
+                parsePrograms(svc.shortEpg(a.user, a.pass, streamId, 4).listings)
+            }.filter { it.end > now }.take(3)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        // Valid until the current programme ends (max 30 min), or retry in 10 min if empty.
+        val until = list.firstOrNull()?.end?.coerceIn(now + 60_000, now + 30 * 60_000) ?: (now + 10 * 60_000)
+        nowCache[streamId] = until to list
+        list
+    }
+
+    suspend fun nowPlaying(streamId: Int): Program? {
+        val now = System.currentTimeMillis()
+        return nowNext(streamId).firstOrNull { it.isOn(now) }
+    }
+
+    /** Everything still to come for a channel, starting with what is on now. */
+    suspend fun fullEpg(streamId: Int): List<Program> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        fullEpgCache[streamId]?.let { (until, list) -> if (until > now) return@withContext list.filter { it.end > now } }
+        val a = account as? Account.Xtream ?: return@withContext emptyList()
+        val svc = api ?: return@withContext emptyList()
+        var list = try {
+            epgLimiter.withPermit { parsePrograms(svc.epgTable(a.user, a.pass, streamId).listings) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        if (list.none { it.end > now }) {
+            // Some panels don't support the full table; ask for a long "short" list instead.
+            list = try {
+                epgLimiter.withPermit { parsePrograms(svc.shortEpg(a.user, a.pass, streamId, 100).listings) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+        fullEpgCache[streamId] = (now + 30 * 60_000) to list
+        list.filter { it.end > now }
+    }
+
+    private fun parsePrograms(el: com.google.gson.JsonElement?): List<Program> {
+        if (el == null || el.isJsonNull) return emptyList()
+        val objects = when {
+            el.isJsonArray -> el.asJsonArray.filter { it.isJsonObject }
+            el.isJsonObject -> el.asJsonObject.entrySet().map { it.value }.filter { it.isJsonObject }
+            else -> emptyList()
+        }
+        return objects.mapNotNull { o ->
+            val item = try { ApiClient.gson.fromJson(o, XtEpgItem::class.java) } catch (e: Exception) { null }
+                ?: return@mapNotNull null
+            val start = item.startTs?.trim()?.toLongOrNull()?.times(1000) ?: parseEpgDate(item.start)
+            val end = item.stopTs?.trim()?.toLongOrNull()?.times(1000) ?: parseEpgDate(item.end)
+            if (start == null || end == null || end <= start) return@mapNotNull null
+            Program(
+                title = decodeEpgText(item.title).ifBlank { "No information" },
+                description = decodeEpgText(item.description),
+                start = start,
+                end = end
+            )
+        }
+            .distinctBy { it.start }
+            .sortedBy { it.start }
+    }
+
+    private fun parseEpgDate(s: String?): Long? {
+        if (s.isNullOrBlank()) return null
+        return try {
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).parse(s.trim())?.time
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private val base64Like = Regex("^[A-Za-z0-9+/=\\s]+$")
+
+    /** Xtream sends EPG titles base64-encoded; some panels send plain text. Handle both. */
+    private fun decodeEpgText(s: String?): String {
+        if (s.isNullOrBlank()) return ""
+        val t = s.trim()
+        if (!base64Like.matches(t)) return t
+        return try {
+            val decoded = String(android.util.Base64.decode(t, android.util.Base64.DEFAULT), Charsets.UTF_8).trim()
+            val looksBroken = decoded.isEmpty() || decoded.any { it == '\uFFFD' || (it.isISOControl() && it != '\n' && it != '\r' && it != '\t') }
+            if (looksBroken) t else decoded
+        } catch (e: IllegalArgumentException) {
+            t
         }
     }
 

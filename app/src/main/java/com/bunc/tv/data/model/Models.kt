@@ -62,6 +62,20 @@ data class XtEpisode(
     @SerializedName("container_extension") val containerExtension: String?
 )
 
+/* get_short_epg / get_simple_data_table — listings may be an array or an object */
+data class XtEpgResponse(
+    @SerializedName("epg_listings") val listings: JsonElement?
+)
+
+data class XtEpgItem(
+    @SerializedName("title") val title: String?,          // base64 on most panels
+    @SerializedName("description") val description: String?,
+    @SerializedName("start") val start: String?,
+    @SerializedName("end") val end: String?,
+    @SerializedName("start_timestamp") val startTs: String?,
+    @SerializedName("stop_timestamp") val stopTs: String?
+)
+
 /* ----------  UI-facing domain models  ---------- */
 
 enum class Section { LIVE, MOVIES, SERIES }
@@ -86,3 +100,15 @@ data class Episode(
     val title: String,
     val ext: String
 )
+
+/** One TV programme from the EPG. Times are epoch milliseconds. */
+data class Program(
+    val title: String,
+    val description: String,
+    val start: Long,
+    val end: Long
+) {
+    fun isOn(now: Long) = now in start until end
+    fun progress(now: Long): Float =
+        if (end <= start) 0f else ((now - start).toFloat() / (end - start)).coerceIn(0f, 1f)
+}

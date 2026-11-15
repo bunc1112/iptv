@@ -15,6 +15,7 @@ import com.bunc.tv.data.NavState
 import com.bunc.tv.data.PlaybackQueue
 import com.bunc.tv.data.ServiceLocator
 import com.bunc.tv.ui.screen.EpisodesScreen
+import com.bunc.tv.ui.screen.GuideScreen
 import com.bunc.tv.ui.screen.HomeScreen
 import com.bunc.tv.ui.screen.LoginScreen
 import com.bunc.tv.ui.screen.PlayerScreen
@@ -31,6 +32,7 @@ object Routes {
     const val EPISODES = "episodes"
     const val SEARCH = "search"
     const val SETTINGS = "settings"
+    const val GUIDE = "guide"
 }
 
 @Composable
@@ -92,7 +94,8 @@ fun BuncRoot() {
                     }
                 },
                 onSearch = { nav.navigate(Routes.SEARCH) },
-                onSettings = { nav.navigate(Routes.SETTINGS) }
+                onSettings = { nav.navigate(Routes.SETTINGS) },
+                onGuide = { nav.navigate(Routes.GUIDE) }
             )
         }
 
@@ -136,7 +139,20 @@ fun BuncRoot() {
         }
 
         composable(Routes.PLAYER) {
-            PlayerScreen(onBack = { nav.popBackStack() })
+            PlayerScreen(
+                onBack = { nav.popBackStack() },
+                onOpenGuide = { nav.navigate(Routes.GUIDE) }
+            )
+        }
+
+        composable(Routes.GUIDE) {
+            GuideScreen(onPlay = { list, startIndex ->
+                PlaybackQueue.setList(list, startIndex)
+                // Opened from the player: replace that player. Opened from Home: Back returns to the guide.
+                nav.navigate(Routes.PLAYER) {
+                    popUpTo(Routes.PLAYER) { inclusive = true }
+                }
+            })
         }
     }
 

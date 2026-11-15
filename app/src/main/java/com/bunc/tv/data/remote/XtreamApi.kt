@@ -68,4 +68,23 @@ interface XtreamApi {
         @Query("series_id") seriesId: Int,
         @Query("action") action: String = "get_series_info"
     ): XtSeriesInfo
+
+    /** Now / next few programmes for one channel. */
+    @GET("player_api.php")
+    suspend fun shortEpg(
+        @Query("username") user: String,
+        @Query("password") pass: String,
+        @Query("stream_id") streamId: Int,
+        @Query("limit") limit: Int,
+        @Query("action") action: String = "get_short_epg"
+    ): XtEpgResponse
+
+    /** Full schedule the panel has for one channel. */
+    @GET("player_api.php")
+    suspend fun epgTable(
+        @Query("username") user: String,
+        @Query("password") pass: String,
+        @Query("stream_id") streamId: Int,
+        @Query("action") action: String = "get_simple_data_table"
+    ): XtEpgResponse
 }

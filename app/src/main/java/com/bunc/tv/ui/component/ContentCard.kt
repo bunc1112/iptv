@@ -46,7 +46,8 @@ fun ContentCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     posterAspect: Float = 2f / 3f,
-    fitImage: Boolean = false
+    fitImage: Boolean = false,
+    subtitle: String? = null
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.08f else 1f, label = "cardScale")
@@ -97,5 +98,15 @@ fun ContentCard(
             fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 2.dp, end = 2.dp)
         )
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                text = subtitle,
+                color = BuncGold,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, start = 2.dp, end = 2.dp)
+            )
+        }
     }
 }

@@ -60,7 +60,19 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import com.bunc.tv.data.NavState
 import com.bunc.tv.data.PlaybackQueue
+import com.bunc.tv.data.ServiceLocator
+import com.bunc.tv.data.model.Program
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.mutableLongStateOf
+import com.bunc.tv.ui.theme.BuncNavyTop
+import com.bunc.tv.ui.theme.BuncTextDim
 import com.bunc.tv.ui.theme.BuncGold
 import com.bunc.tv.ui.theme.BuncNavyDeep
 import kotlinx.coroutines.Job
@@ -92,7 +104,7 @@ private const val MAX_VOD_RETRIES = 5
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(onBack: () -> Unit) {
+fun PlayerScreen(onBack: () -> Unit, onOpenGuide: () -> Unit) {
     val context = LocalContext.current
     val items = remember { PlaybackQueue.items }
     val isLive = remember { PlaybackQueue.live }
@@ -110,6 +122,9 @@ fun PlayerScreen(onBack: () -> Unit) {
     var controls by remember { mutableStateOf(false) }   // touch controls (phone)
     var tick by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf<String?>(null) }   // "Reconnecting…" etc.
+    var epg by remember { mutableStateOf<List<Program>>(emptyList()) }  // now + next
+    var clock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val hasGuide = isLive && ServiceLocator.repo.hasEpg
 
     val scope = rememberCoroutineScope()
     val rs = remember { ReconnectState() }
@@ -188,6 +203,28 @@ fun PlayerScreen(onBack: () -> Unit) {
         rs.attempts = 0
         status = null
         startFresh()
+    }
+
+    fun openGuide() {
+        if (!hasGuide) return
+        NavState.guideChannels = items
+        NavState.guideStart = index
+        onOpenGuide()
+    }
+
+    // Now / next for the current channel; refreshed when the programme changes.
+    LaunchedEffect(index) {
+        epg = emptyList()
+        val id = items.getOrNull(index)?.streamId ?: return@LaunchedEffect
+        if (!hasGuide) return@LaunchedEffect
+        while (true) {
+            epg = try { ServiceLocator.repo.nowNext(id) } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e; emptyList()
+            }
+            clock = System.currentTimeMillis()
+            val current = epg.firstOrNull { it.isOn(clock) }
+            delay(current?.let { (it.end - clock + 1_000).coerceIn(15_000, 300_000) } ?: 120_000)
+        }
     }
 
     // Player events: errors and "ended" both mean the live stream dropped.
@@ -269,13 +306,13 @@ fun PlayerScreen(onBack: () -> Unit) {
     BackHandler(onBack = onBack)
 
     val focusRequester = remember { FocusRequester() }
-    if (canZap) {
+    if (isLive) {
         LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     }
 
     // Auto-hide the channel name after it appears / changes.
     LaunchedEffect(index, nameOverlay) {
-        if (nameOverlay) { delay(2500); nameOverlay = false }
+        if (nameOverlay) { clock = System.currentTimeMillis(); delay(5000); nameOverlay = false }
     }
     // Auto-hide the touch controls a few seconds after the last tap.
     LaunchedEffect(tick, controls) {
@@ -285,7 +322,7 @@ fun PlayerScreen(onBack: () -> Unit) {
     var rootModifier = Modifier
         .fillMaxSize()
         .background(Color.Black)
-    if (canZap) {
+    if (isLive) {
         rootModifier = rootModifier
             .focusRequester(focusRequester)
             .focusable()
@@ -294,8 +331,13 @@ fun PlayerScreen(onBack: () -> Unit) {
                 when (e.key) {
                     Key.DirectionUp, Key.DirectionLeft, Key.ChannelUp -> { zap(-1); true }
                     Key.DirectionDown, Key.DirectionRight, Key.ChannelDown -> { zap(1); true }
-                    // OK shows which channel you're on.
-                    Key.DirectionCenter, Key.Enter -> { nameOverlay = true; true }
+                    // OK shows what's on; OK again (while it's showing) opens the full guide.
+                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                        if (nameOverlay && hasGuide) openGuide() else nameOverlay = true
+                        true
+                    }
+                    Key.Guide -> { if (hasGuide) openGuide() else nameOverlay = true; true }
+                    Key.Info -> { nameOverlay = true; true }
                     else -> false
                 }
             }
@@ -313,10 +355,10 @@ fun PlayerScreen(onBack: () -> Unit) {
                     this.player = player
                     keepScreenOn = true
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                    // For zappable lists we handle keys ourselves, so the view must not grab focus/controls.
-                    useController = !canZap
-                    isFocusable = !canZap
-                    isFocusableInTouchMode = !canZap
+                    // For live TV we handle keys ourselves, so the view must not grab focus/controls.
+                    useController = !isLive
+                    isFocusable = !isLive
+                    isFocusableInTouchMode = !isLive
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -326,18 +368,37 @@ fun PlayerScreen(onBack: () -> Unit) {
         )
 
         if (nameOverlay && title.isNotBlank()) {
-            Text(
-                text = title,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
+            val current = epg.firstOrNull { it.isOn(clock) }
+            val next = epg.firstOrNull { it.start >= (current?.end ?: clock) }
+            Column(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(28.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xCC0A1130))
-                    .padding(horizontal = 18.dp, vertical = 10.dp)
-            )
+                    .align(Alignment.BottomStart)
+                    .padding(24.dp)
+                    .widthIn(max = 640.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xE60A1130))
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
+            ) {
+                Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                if (current != null) {
+                    Spacer(Modifier.height(8.dp))
+                    EpgLine("NOW", current, highlight = true)
+                    LinearProgressIndicator(
+                        progress = { current.progress(clock) },
+                        color = BuncGold,
+                        trackColor = BuncNavyTop,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp).height(4.dp)
+                    )
+                }
+                if (next != null) {
+                    Spacer(Modifier.height(6.dp))
+                    EpgLine("NEXT", next, highlight = false)
+                }
+                if (hasGuide) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("OK again: full TV guide", color = BuncTextDim, fontSize = 12.sp)
+                }
+            }
         }
 
         // Reconnect / failure notice
@@ -347,8 +408,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                 color = Color.White,
                 fontSize = 16.sp,
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(28.dp)
+                    .align(Alignment.TopCenter)
+                    .padding(24.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color(0xCC0A1130))
                     .padding(horizontal = 16.dp, vertical = 10.dp)
@@ -356,7 +417,7 @@ fun PlayerScreen(onBack: () -> Unit) {
         }
 
         // Touch controls: tappable Prev / Next channel buttons (for phones/tablets).
-        if (canZap && controls) {
+        if (isLive && controls) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -364,8 +425,9 @@ fun PlayerScreen(onBack: () -> Unit) {
                     .padding(24.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                ChannelButton("‹ Prev", Modifier.weight(1f)) { zap(-1); tick++ }
-                ChannelButton("Next ›", Modifier.weight(1f)) { zap(1); tick++ }
+                if (canZap) ChannelButton("‹ Prev", Modifier.weight(1f)) { zap(-1); tick++ }
+                if (hasGuide) ChannelButton("Guide", Modifier.weight(1f)) { openGuide() }
+                if (canZap) ChannelButton("Next ›", Modifier.weight(1f)) { zap(1); tick++ }
             }
         }
     }
@@ -382,5 +444,36 @@ private fun ChannelButton(label: String, modifier: Modifier = Modifier, onClick:
         contentAlignment = Alignment.Center
     ) {
         Text(label, color = BuncNavyDeep, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun EpgLine(label: String, p: Program, highlight: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            color = if (highlight) BuncNavyDeep else BuncTextDim,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(if (highlight) BuncGold else BuncNavyTop)
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "${hm(p.start)}–${hm(p.end)}",
+            color = if (highlight) BuncGold else BuncTextDim,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            p.title,
+            color = Color.White,
+            fontSize = 15.sp,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
     }
 }
