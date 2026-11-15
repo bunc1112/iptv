@@ -3,6 +3,7 @@ package com.bunc.tv.ui.screen
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -13,11 +14,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,18 +41,31 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.bunc.tv.data.PlaybackQueue
 import com.bunc.tv.ui.theme.BuncGold
 import com.bunc.tv.ui.theme.BuncNavyDeep
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private fun Context.findActivity(): Activity? {
     var ctx: Context? = this
@@ -63,26 +76,103 @@ private fun Context.findActivity(): Activity? {
     return null
 }
 
+/** Bookkeeping for auto-reconnect; plain fields, only touched on the main thread. */
+private class ReconnectState {
+    var job: Job? = null
+    var attempts = 0
+    var lastPosition = -1L
+    var lastProgressAt = 0L     // when the playback position last moved
+    var steadySince = 0L        // start of the current run of uninterrupted playback
+    var pausedByLifecycle = false
+}
+
+private const val STALL_TIMEOUT_MS = 12_000L   // live: no progress for this long => reconnect
+private const val STEADY_RESET_MS = 15_000L    // this much smooth playback clears the retry counter
+private const val MAX_VOD_RETRIES = 5
+
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val items = remember { PlaybackQueue.items }
+    val isLive = remember { PlaybackQueue.live }
     val canZap = items.size > 1
 
-    var index by remember { mutableIntStateOf(PlaybackQueue.index) }
-    var title by remember { mutableStateOf(PlaybackQueue.current()?.title ?: "") }
+    // Nothing to play (e.g. the app was restored after being killed) — leave.
+    if (items.isEmpty()) {
+        LaunchedEffect(Unit) { onBack() }
+        return
+    }
+
+    var index by remember { mutableIntStateOf(PlaybackQueue.index.coerceIn(0, items.lastIndex)) }
+    var title by remember { mutableStateOf(items.getOrNull(index)?.title ?: "") }
     var nameOverlay by remember { mutableStateOf(true) }
     var controls by remember { mutableStateOf(false) }   // touch controls (phone)
     var tick by remember { mutableIntStateOf(0) }
+    var status by remember { mutableStateOf<String?>(null) }   // "Reconnecting…" etc.
+
+    val scope = rememberCoroutineScope()
+    val rs = remember { ReconnectState() }
 
     val player = remember {
         val loadControl = DefaultLoadControl.Builder()
+            // Enough cushion to ride out short hiccups, still starts in ~2.5s.
             .setBufferDurationsMs(20_000, 60_000, 2_500, 5_000)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
-        ExoPlayer.Builder(context).setLoadControl(loadControl).build().apply {
-            PlaybackQueue.current()?.let {
-                setMediaItem(MediaItem.fromUri(it.url)); prepare(); playWhenReady = true
+        // Providers often redirect (http -> https, or to another host); allow it and
+        // use explicit timeouts so a dead connection is noticed instead of hanging.
+        val http = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(15_000)
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http)))
+            .setLoadControl(loadControl)
+            // Keep CPU + Wi-Fi awake while playing so the network isn't throttled.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .build()
+    }
+
+    /** Load the current item from scratch and play. */
+    fun startFresh() {
+        val item = items.getOrNull(index) ?: return
+        if (item.url.isBlank()) { status = "This item has no stream address"; return }
+        rs.lastPosition = -1L
+        rs.lastProgressAt = SystemClock.elapsedRealtime()
+        rs.steadySince = 0L
+        player.setMediaItem(MediaItem.fromUri(item.url))
+        player.prepare()
+        player.playWhenReady = true
+    }
+
+    /** Stream died (error, ended, or stalled): try again after a short, growing delay. */
+    fun scheduleReconnect(error: PlaybackException? = null) {
+        if (rs.job?.isActive == true) return
+        if (!isLive && rs.attempts >= MAX_VOD_RETRIES) {
+            status = "Playback failed. Press Back and try again."
+            return
+        }
+        rs.attempts++
+        val waitMs = when {
+            rs.attempts <= 1 -> 500L
+            rs.attempts == 2 -> 1_500L
+            rs.attempts <= 4 -> 3_000L
+            else -> 8_000L
+        }
+        status = if (rs.attempts > 6) "Stream not responding — still trying…" else "Reconnecting…"
+        rs.job = scope.launch {
+            delay(waitMs)
+            rs.lastProgressAt = SystemClock.elapsedRealtime()
+            when {
+                // Live: always reconnect to the live edge with a fresh request.
+                isLive -> startFresh()
+                // HLS fell behind the live window: jump back to the newest segment.
+                error?.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+                    player.seekToDefaultPosition(); player.prepare(); player.playWhenReady = true
+                }
+                // Movie / episode: retry from where it stopped.
+                else -> { player.prepare(); player.playWhenReady = true }
             }
         }
     }
@@ -92,15 +182,82 @@ fun PlayerScreen(onBack: () -> Unit) {
         val ni = ((index + delta) % items.size + items.size) % items.size
         index = ni
         PlaybackQueue.index = ni
-        val it = items[ni]
-        title = it.title
+        title = items[ni].title
         nameOverlay = true
-        player.setMediaItem(MediaItem.fromUri(it.url))
-        player.prepare()
-        player.playWhenReady = true
+        rs.job?.cancel()
+        rs.attempts = 0
+        status = null
+        startFresh()
     }
 
-    DisposableEffect(Unit) { onDispose { player.release() } }
+    // Player events: errors and "ended" both mean the live stream dropped.
+    DisposableEffect(Unit) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                scheduleReconnect(error)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                when (playbackState) {
+                    Player.STATE_READY -> status = null
+                    // A provider closing the connection looks like a normal "end of file".
+                    Player.STATE_ENDED -> if (isLive) scheduleReconnect()
+                }
+            }
+        }
+        player.addListener(listener)
+        startFresh()
+        onDispose {
+            rs.job?.cancel()
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    // Watchdog: a live stream that makes no progress (frozen picture or endless
+    // buffering) without reporting an error still gets reconnected.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2_000)
+            val now = SystemClock.elapsedRealtime()
+            if (!player.playWhenReady || rs.job?.isActive == true) {
+                rs.lastProgressAt = now
+                rs.steadySince = 0L
+                continue
+            }
+            val pos = player.currentPosition
+            if (player.playbackState == Player.STATE_READY && pos != rs.lastPosition) {
+                rs.lastPosition = pos
+                rs.lastProgressAt = now
+                if (rs.steadySince == 0L) rs.steadySince = now
+                if (now - rs.steadySince > STEADY_RESET_MS) rs.attempts = 0
+            } else {
+                rs.steadySince = 0L
+                if (isLive && now - rs.lastProgressAt > STALL_TIMEOUT_MS) scheduleReconnect()
+            }
+        }
+    }
+
+    // Pause when the app goes to the background; pick the stream back up on return.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    rs.pausedByLifecycle = player.playWhenReady
+                    rs.job?.cancel()
+                    player.playWhenReady = false
+                }
+                Lifecycle.Event.ON_START -> if (rs.pausedByLifecycle) {
+                    rs.pausedByLifecycle = false
+                    if (isLive) startFresh() else player.playWhenReady = true
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Keep the screen awake while watching (stops the dim/screensaver).
     DisposableEffect(Unit) {
@@ -113,16 +270,16 @@ fun PlayerScreen(onBack: () -> Unit) {
 
     val focusRequester = remember { FocusRequester() }
     if (canZap) {
-        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     }
 
     // Auto-hide the channel name after it appears / changes.
     LaunchedEffect(index, nameOverlay) {
-        if (nameOverlay) { kotlinx.coroutines.delay(2500); nameOverlay = false }
+        if (nameOverlay) { delay(2500); nameOverlay = false }
     }
     // Auto-hide the touch controls a few seconds after the last tap.
     LaunchedEffect(tick, controls) {
-        if (controls) { kotlinx.coroutines.delay(4000); controls = false }
+        if (controls) { delay(4000); controls = false }
     }
 
     var rootModifier = Modifier
@@ -137,6 +294,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                 when (e.key) {
                     Key.DirectionUp, Key.DirectionLeft, Key.ChannelUp -> { zap(-1); true }
                     Key.DirectionDown, Key.DirectionRight, Key.ChannelDown -> { zap(1); true }
+                    // OK shows which channel you're on.
+                    Key.DirectionCenter, Key.Enter -> { nameOverlay = true; true }
                     else -> false
                 }
             }
@@ -153,6 +312,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                 PlayerView(ctx).apply {
                     this.player = player
                     keepScreenOn = true
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    // For zappable lists we handle keys ourselves, so the view must not grab focus/controls.
                     useController = !canZap
                     isFocusable = !canZap
                     isFocusableInTouchMode = !canZap
@@ -176,6 +337,21 @@ fun PlayerScreen(onBack: () -> Unit) {
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color(0xCC0A1130))
                     .padding(horizontal = 18.dp, vertical = 10.dp)
+            )
+        }
+
+        // Reconnect / failure notice
+        status?.let { msg ->
+            Text(
+                text = msg,
+                color = Color.White,
+                fontSize = 16.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(28.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xCC0A1130))
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
             )
         }
 

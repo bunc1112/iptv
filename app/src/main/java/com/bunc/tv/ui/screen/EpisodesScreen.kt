@@ -40,7 +40,7 @@ fun EpisodesScreen(
         value = try { repo.episodes(seriesId) } catch (e: Exception) { emptyList() }
     }
 
-    Column(Modifier.fillMaxSize().background(BuncNavyDeep).padding(24.dp)) {
+    Column(Modifier.fillMaxSize().background(BuncNavyDeep).systemBarsPadding().padding(24.dp)) {
         Text(
             text = title.ifBlank { "Episodes" },
             color = BuncText,

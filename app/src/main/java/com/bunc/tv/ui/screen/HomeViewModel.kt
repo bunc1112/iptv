@@ -10,6 +10,8 @@ import com.bunc.tv.data.ServiceLocator
 import com.bunc.tv.data.model.Category
 import com.bunc.tv.data.model.Content
 import com.bunc.tv.data.model.Section
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class HomeViewModel : ViewModel() {
@@ -32,6 +34,10 @@ class HomeViewModel : ViewModel() {
     var error by mutableStateOf<String?>(null)
         private set
 
+    // Only the newest request may update the screen (fast tab/folder switching).
+    private var categoriesJob: Job? = null
+    private var contentJob: Job? = null
+
     init { loadCategories() }
 
     fun selectSection(s: Section) {
@@ -48,14 +54,24 @@ class HomeViewModel : ViewModel() {
     }
 
     private fun loadCategories() {
-        viewModelScope.launch {
+        categoriesJob?.cancel()
+        contentJob?.cancel()
+        val wanted = section
+        categoriesJob = viewModelScope.launch {
             error = null
-            categories = try {
-                FolderOrder.apply(section, repo.categories(section))
+            loadingContent = true
+            content = emptyList()
+            val loaded = try {
+                FolderOrder.apply(wanted, repo.categories(wanted))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                error = e.message; emptyList()
+                error = friendly(e); emptyList()
             }
-            selectedCategory = categories.firstOrNull()?.id ?: ""
+            if (wanted != section) return@launch
+            categories = loaded
+            selectedCategory = loaded.firstOrNull()?.id ?: ""
+            if (loaded.isEmpty()) { loadingContent = false; return@launch }
             loadContent()
         }
     }
@@ -72,16 +88,30 @@ class HomeViewModel : ViewModel() {
     }
 
     private fun loadContent() {
-        viewModelScope.launch {
+        contentJob?.cancel()
+        val wantedSection = section
+        val wantedCategory = selectedCategory
+        contentJob = viewModelScope.launch {
             loadingContent = true
             error = null
-            content = try {
-                repo.content(section, selectedCategory)
+            val loaded = try {
+                repo.content(wantedSection, wantedCategory)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                error = e.message; emptyList()
+                error = friendly(e); emptyList()
             }
+            if (wantedSection != section || wantedCategory != selectedCategory) return@launch
+            content = loaded
             loadingContent = false
         }
+    }
+
+    private fun friendly(e: Exception): String = when (e) {
+        is java.net.UnknownHostException -> "Can't find the server. Check your internet connection."
+        is java.net.SocketTimeoutException -> "The server took too long to answer. Try again."
+        is java.io.IOException -> "Connection problem. Check your internet and try again."
+        else -> "Couldn't load this list from the server."
     }
 
     /** Leaves the current profile and returns to the picker; saved profiles are kept. */

@@ -1,5 +1,6 @@
 package com.bunc.tv.data.model
 
+import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 
 /* ----------  Xtream Codes API response models  ---------- */
@@ -49,13 +50,15 @@ data class XtSeries(
 
 /* get_series_info */
 data class XtSeriesInfo(
-    @SerializedName("episodes") val episodes: Map<String, List<XtEpisode>>?
+    // Usually {"1":[...], "2":[...]}, but some panels send [[...],[...]] or [] — parsed by hand.
+    @SerializedName("episodes") val episodes: JsonElement?
 )
 
 data class XtEpisode(
     @SerializedName("id") val id: String?,
     @SerializedName("title") val title: String?,
     @SerializedName("season") val season: Int?,
+    @SerializedName("episode_num") val episodeNum: Int?,
     @SerializedName("container_extension") val containerExtension: String?
 )
 

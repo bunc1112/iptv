@@ -59,7 +59,7 @@ fun LoginScreen(
     var connectFocused by remember { mutableStateOf(false) }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(BuncNavyDeep),
+        modifier = Modifier.fillMaxSize().background(BuncNavyDeep).systemBarsPadding().imePadding(),
         contentAlignment = Alignment.Center
     ) {
         Column(

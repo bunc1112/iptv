@@ -33,7 +33,13 @@ object M3uParser {
                     val attrs = attrRegex.findAll(line).associate { it.groupValues[1] to it.groupValues[2] }
                     pendingLogo = attrs["tvg-logo"]
                     pendingGroup = attrs["group-title"]?.takeIf { it.isNotBlank() } ?: "Other"
-                    pendingName = line.substringAfterLast(',').trim().ifBlank { attrs["tvg-name"] ?: "Channel" }
+                    pendingName = displayName(line).ifBlank { attrs["tvg-name"]?.ifBlank { null } ?: "Channel" }
+                }
+                line.startsWith("#EXTGRP:", ignoreCase = true) -> {
+                    // Alternative way some playlists give the group
+                    if (pendingGroup == "Other") {
+                        line.substringAfter(':').trim().takeIf { it.isNotBlank() }?.let { pendingGroup = it }
+                    }
                 }
                 line.startsWith("#") -> { /* skip other directives */ }
                 else -> {
@@ -52,6 +58,18 @@ object M3uParser {
             }
         }
         return out
+    }
+
+    /** The name is everything after the first comma that is not inside quotes (names may contain commas). */
+    private fun displayName(extinf: String): String {
+        var inQuotes = false
+        for (i in extinf.indices) {
+            when (extinf[i]) {
+                '"' -> inQuotes = !inQuotes
+                ',' -> if (!inQuotes) return extinf.substring(i + 1).trim()
+            }
+        }
+        return ""
     }
 
     fun toContent(ch: M3uChannel): Content =

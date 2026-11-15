@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Keeps CPU/Wi-Fi awake during playback so streams are not throttled -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- TV boxes have no touchscreen; don't require one -->
     <uses-feature
@@ -28,7 +30,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden|navigation"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
             android:theme="@style/Theme.Bunc">
             <!-- Phone / tablet launcher -->
             <intent-filter>

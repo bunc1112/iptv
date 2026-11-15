@@ -24,14 +24,19 @@ object PlaybackQueue {
 
     @Volatile var items: List<Item> = emptyList()
     @Volatile var index: Int = 0
+    /** True for live TV (reconnects to the live edge); false for movies/episodes (resume in place). */
+    @Volatile var live: Boolean = false
 
+    /** A single movie or episode. */
     fun setSingle(url: String, title: String) {
-        items = listOf(Item(title, url)); index = 0
+        items = listOf(Item(title, url)); index = 0; live = false
     }
 
+    /** A list of live channels the player can zap through. */
     fun setList(list: List<Item>, startIndex: Int) {
         items = list
         index = startIndex.coerceIn(0, maxOf(0, list.size - 1))
+        live = true
     }
 
     fun current(): Item? = items.getOrNull(index)

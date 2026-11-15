@@ -39,7 +39,7 @@ fun ProfilesScreen(
     vm: ProfilesViewModel = viewModel()
 ) {
     Box(
-        modifier = Modifier.fillMaxSize().background(BuncNavyDeep),
+        modifier = Modifier.fillMaxSize().background(BuncNavyDeep).systemBarsPadding().imePadding(),
         contentAlignment = Alignment.Center
     ) {
         Column(

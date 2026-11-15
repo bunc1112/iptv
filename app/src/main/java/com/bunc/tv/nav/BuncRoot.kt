@@ -6,7 +6,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -56,7 +55,7 @@ fun BuncRoot() {
             ProfilesScreen(
                 onUseProfile = {
                     nav.navigate(Routes.HOME) {
-                        popUpTo(Routes.PROFILES) { inclusive = true }
+                        popUpTo(nav.graph.id) { inclusive = true }
                     }
                 },
                 onAddProfile = { nav.navigate(Routes.LOGIN) }
@@ -67,7 +66,7 @@ fun BuncRoot() {
             LoginScreen(onConnected = {
                 // Clear login/picker from the back stack; HOME becomes the root.
                 nav.navigate(Routes.HOME) {
-                    popUpTo(nav.graph.findStartDestination().id) { inclusive = true }
+                    popUpTo(nav.graph.id) { inclusive = true }
                 }
             })
         }
@@ -89,7 +88,7 @@ fun BuncRoot() {
                 onLogout = {
                     // Back to the profile picker (profiles are kept).
                     nav.navigate(Routes.PROFILES) {
-                        popUpTo(Routes.HOME) { inclusive = true }
+                        popUpTo(nav.graph.id) { inclusive = true }
                     }
                 },
                 onSearch = { nav.navigate(Routes.SEARCH) },
@@ -138,6 +137,17 @@ fun BuncRoot() {
 
         composable(Routes.PLAYER) {
             PlayerScreen(onBack = { nav.popBackStack() })
+        }
+    }
+
+    // Android can kill the app in the background and later restore the last screen,
+    // but the signed-in account is gone by then. Start over instead of showing empty lists.
+    LaunchedEffect(Unit) {
+        val route = nav.currentDestination?.route
+        if (ServiceLocator.repo.account == null && route != null &&
+            route != Routes.LOGIN && route != Routes.PROFILES
+        ) {
+            nav.navigate(startRoute) { popUpTo(nav.graph.id) { inclusive = true } }
         }
     }
 }

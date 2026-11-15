@@ -20,8 +20,8 @@ object Repository {
     @Volatile var account: Account? = null
         private set
 
-    private var api: XtreamApi? = null
-    private var m3uChannels: List<M3uChannel> = emptyList()
+    @Volatile private var api: XtreamApi? = null
+    @Volatile private var m3uChannels: List<M3uChannel> = emptyList()
 
     // Session caches so revisiting a section/category is instant (no re-fetch).
     // Thread-safe: search loads Live, Movies and Series in parallel.
@@ -119,9 +119,9 @@ object Repository {
                     Section.SERIES -> svc.seriesCategories(a.user, a.pass)
                 }
                 listOf(all) + raw.mapNotNull { c ->
-                    val id = c.categoryId ?: return@mapNotNull null
-                    Category(id, c.categoryName ?: "Unnamed")
-                }
+                    val id = c.categoryId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    Category(id, c.categoryName?.trim()?.ifBlank { null } ?: "Unnamed")
+                }.distinctBy { it.id }
             }
             is Account.M3u -> {
                 if (section != Section.LIVE) emptyList()
@@ -162,7 +162,7 @@ object Repository {
                     .map { M3uParser.toContent(it) }
             }
             null -> emptyList()
-        }
+        }.distinctBy { it.id } // grids need unique ids; some panels list a stream twice
         contentCache[key] = result
         result
     }
@@ -172,29 +172,52 @@ object Repository {
         val a = account as? Account.Xtream ?: return@withContext emptyList()
         val svc = api ?: return@withContext emptyList()
         val info = svc.seriesInfo(a.user, a.pass, seriesId)
-        val result = info.episodes?.values?.flatten()?.mapNotNull { e ->
-            val id = e.id ?: return@mapNotNull null
-            Episode(id, e.title ?: "Episode", e.containerExtension ?: "mp4")
-        } ?: emptyList()
+        val result = parseEpisodes(info.episodes)
+            .sortedWith(compareBy({ it.season ?: 0 }, { it.episodeNum ?: 0 }))
+            .mapNotNull { e ->
+                val id = e.id?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                Episode(id, e.title?.ifBlank { null } ?: "Episode ${e.episodeNum ?: ""}".trim(), e.containerExtension?.ifBlank { null } ?: "mp4")
+            }
+            .distinctBy { it.id }
         episodeCache[seriesId] = result
         result
     }
 
+    /** Episodes arrive as {"season":[...]} on most panels, but as nested arrays on some. */
+    private fun parseEpisodes(el: com.google.gson.JsonElement?): List<XtEpisode> {
+        if (el == null || el.isJsonNull) return emptyList()
+        fun one(e: com.google.gson.JsonElement): XtEpisode? =
+            try { ApiClient.gson.fromJson(e, XtEpisode::class.java) } catch (ex: Exception) { null }
+        fun many(e: com.google.gson.JsonElement): List<XtEpisode> = when {
+            e.isJsonArray -> e.asJsonArray.mapNotNull { if (it.isJsonObject) one(it) else null }
+            e.isJsonObject -> listOfNotNull(one(e))
+            else -> emptyList()
+        }
+        return when {
+            el.isJsonObject -> el.asJsonObject.entrySet().flatMap { many(it.value) }
+            el.isJsonArray -> el.asJsonArray.flatMap { many(it) }
+            else -> emptyList()
+        }
+    }
+
     // ----------  Stream URLs  ----------
+
+    /** Usernames/passwords can contain characters that are not valid in a URL path. */
+    private fun enc(s: String): String = android.net.Uri.encode(s)
 
     fun liveUrl(streamId: Int): String {
         val a = account as? Account.Xtream ?: return ""
-        return "${a.host}/live/${a.user}/${a.pass}/$streamId.ts"
+        return "${a.host}/live/${enc(a.user)}/${enc(a.pass)}/$streamId.ts"
     }
 
     fun movieUrl(streamId: Int, ext: String?): String {
         val a = account as? Account.Xtream ?: return ""
-        return "${a.host}/movie/${a.user}/${a.pass}/$streamId.${ext ?: "mp4"}"
+        return "${a.host}/movie/${enc(a.user)}/${enc(a.pass)}/$streamId.${ext?.ifBlank { null } ?: "mp4"}"
     }
 
     fun episodeUrl(episode: Episode): String {
         val a = account as? Account.Xtream ?: return ""
-        return "${a.host}/series/${a.user}/${a.pass}/${episode.id}.${episode.ext}"
+        return "${a.host}/series/${enc(a.user)}/${enc(a.pass)}/${episode.id}.${episode.ext}"
     }
 
     fun m3uUrl(contentId: Int): String =
