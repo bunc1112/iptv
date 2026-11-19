@@ -18,7 +18,9 @@ data class SavedAccount(
     val host: String = "",
     val user: String = "",
     val pass: String = "",
-    val m3uUrl: String = ""
+    val m3uUrl: String = "",
+    /** Client identity the server accepted at login (blank = default). */
+    val userAgent: String = ""
 )
 
 /**

@@ -20,6 +20,22 @@ object ApiClient {
     val userAgent: String =
         System.getProperty("http.agent")?.takeIf { it.isNotBlank() } ?: "Dalvik/2.1.0 (Linux; U; Android)"
 
+    /**
+     * Client identities tried at login, in order. Some panels only answer certain clients
+     * (and reply 404 to others); the one that works is saved with the profile.
+     */
+    val userAgentCandidates: List<Pair<String, String>> = listOf(
+        "Android" to userAgent,
+        "VLC" to "VLC/3.0.20 LibVLC/3.0.20",
+        "Browser" to "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36",
+        "okhttp" to "okhttp/4.12.0"
+    )
+
+    /** Identity chosen for the signed-in account (null = default [userAgent]). */
+    @Volatile var accountUserAgent: String? = null
+
+    fun currentUserAgent(): String = accountUserAgent ?: userAgent
+
     private val http: OkHttpClient by lazy {
         // Load lots of channel/poster logos in parallel so grids fill fast.
         val dispatcher = okhttp3.Dispatcher().apply {
@@ -31,7 +47,7 @@ object ApiClient {
             .addInterceptor { chain ->
                 val req = chain.request()
                 chain.proceed(
-                    if (req.header("User-Agent") == null) req.newBuilder().header("User-Agent", userAgent).build()
+                    if (req.header("User-Agent") == null) req.newBuilder().header("User-Agent", currentUserAgent()).build()
                     else req
                 )
             }

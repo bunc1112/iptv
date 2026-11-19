@@ -13,8 +13,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.Request
 
 sealed class Account {
-    data class Xtream(val host: String, val user: String, val pass: String, val name: String) : Account()
-    data class M3u(val url: String, val name: String) : Account()
+    data class Xtream(val host: String, val user: String, val pass: String, val name: String, val userAgent: String? = null) : Account()
+    data class M3u(val url: String, val name: String, val userAgent: String? = null) : Account()
 }
 
 object Repository {
@@ -49,6 +49,7 @@ object Repository {
 
     fun reset() {
         account = null; api = null; m3uChannels = emptyList(); clearCaches()
+        ApiClient.accountUserAgent = null
     }
 
     private fun normalizeHost(raw: String): String {
@@ -62,62 +63,86 @@ object Repository {
 
     // ----------  Connect  ----------
 
+    private sealed class LoginTry {
+        class Ok(val service: XtreamApi) : LoginTry()
+        object Rejected : LoginTry()                       // server says wrong username/password
+        class Refused(val note: String) : LoginTry()       // 404/403/not-Xtream for this client identity
+        class Network(val error: Exception) : LoginTry()   // no connection at all
+    }
+
+    private suspend fun tryLogin(h: String, user: String, pass: String): LoginTry {
+        val service = ApiClient.xtream(h)
+        return try {
+            val auth = service.login(user, pass)
+            if (auth.userInfo?.auth == 1 || auth.userInfo?.status.equals("Active", true)) LoginTry.Ok(service)
+            else LoginTry.Rejected
+        } catch (e: retrofit2.HttpException) {
+            val finalHost = e.response()?.raw()?.request?.url?.host
+            val moved = if (finalHost != null && !h.contains(finalHost, ignoreCase = true)) " via $finalHost" else ""
+            LoginTry.Refused("HTTP ${e.code()}$moved")
+        } catch (e: com.google.gson.JsonParseException) {
+            LoginTry.Refused("not Xtream data")
+        } catch (e: IllegalStateException) {
+            LoginTry.Refused("not Xtream data")
+        } catch (e: java.io.IOException) {
+            LoginTry.Network(e)
+        }
+    }
+
     suspend fun connectXtream(host: String, user: String, pass: String, name: String): Result<Unit> =
         withContext(Dispatchers.IO) {
-            try {
-                val h = normalizeHost(host)
-                val service = ApiClient.xtream(h)
-                val auth = try {
-                    service.login(user, pass)
-                } catch (e: retrofit2.HttpException) {
-                    // No Xtream API here (e.g. 404): many providers still serve the playlist.
-                    return@withContext playlistFallback(h, user, pass, name, e)
-                } catch (e: com.google.gson.JsonParseException) {
-                    // Answered with something that isn't Xtream JSON (an HTML page, etc.).
-                    return@withContext playlistFallback(h, user, pass, name, e)
+            val h = normalizeHost(host)
+            val notes = ArrayList<String>()
+            // Some panels only answer certain clients: try each identity until one is accepted.
+            for ((label, ua) in ApiClient.userAgentCandidates) {
+                ApiClient.accountUserAgent = ua
+                when (val r = tryLogin(h, user, pass)) {
+                    is LoginTry.Ok -> {
+                        api = r.service
+                        account = Account.Xtream(h, user, pass, name.ifBlank { user }, ua)
+                        clearCaches()
+                        return@withContext Result.success(Unit)
+                    }
+                    is LoginTry.Rejected -> {
+                        ApiClient.accountUserAgent = null
+                        return@withContext Result.failure(IllegalStateException("The server rejected this username or password."))
+                    }
+                    is LoginTry.Network -> {
+                        ApiClient.accountUserAgent = null
+                        return@withContext Result.failure(r.error)
+                    }
+                    is LoginTry.Refused -> notes += "$label: ${r.note}"
                 }
-                if (auth.userInfo?.auth == 1 || auth.userInfo?.status.equals("Active", true)) {
-                    api = service
-                    account = Account.Xtream(h, user, pass, name.ifBlank { user })
-                    clearCaches()
-                    Result.success(Unit)
-                } else {
-                    Result.failure(IllegalStateException("The server rejected this username or password."))
+            }
+            // No Xtream API answered: many providers still serve the M3U playlist with the same login.
+            val url = "$h/get.php?username=${enc(user)}&password=${enc(pass)}&type=m3u_plus&output=ts"
+            for ((label, ua) in ApiClient.userAgentCandidates) {
+                ApiClient.accountUserAgent = ua
+                try {
+                    val channels = M3uParser.parse(fetch(url))
+                    if (channels.isNotEmpty()) {
+                        m3uChannels = channels
+                        account = Account.M3u(url, name.ifBlank { user }, ua)
+                        clearCaches()
+                        return@withContext Result.success(Unit)
+                    }
+                    notes += "$label playlist: empty"
+                } catch (e: Exception) {
+                    notes += "$label playlist: ${e.message ?: "failed"}"
                 }
-            } catch (e: Exception) {
-                Result.failure(e)
             }
+            ApiClient.accountUserAgent = null
+            Result.failure(
+                IllegalStateException(
+                    "The server refused every connection type Bunc tried. Check the server address with your provider.\n" +
+                        notes.joinToString(" · ")
+                )
+            )
         }
-
-    /** Xtream login failed: try the same server's M3U playlist (get.php) with the same login. */
-    private fun playlistFallback(host: String, user: String, pass: String, name: String, cause: Exception): Result<Unit> {
-        val url = "$host/get.php?username=${enc(user)}&password=${enc(pass)}&type=m3u_plus&output=ts"
-        return try {
-            val channels = M3uParser.parse(fetch(url))
-            if (channels.isEmpty()) {
-                Result.failure(IllegalStateException(xtreamFailureMessage(cause)))
-            } else {
-                m3uChannels = channels
-                account = Account.M3u(url, name.ifBlank { user })
-                clearCaches()
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Result.failure(IllegalStateException(xtreamFailureMessage(cause)))
-        }
-    }
-
-    private fun xtreamFailureMessage(e: Exception): String = when {
-        e is retrofit2.HttpException && e.code() == 404 ->
-            "This server has no Xtream login (HTTP 404). Check the server address with your provider."
-        e is retrofit2.HttpException && (e.code() == 401 || e.code() == 403) ->
-            "The server refused access (HTTP ${e.code()}). Check your username and password."
-        e is retrofit2.HttpException -> "The server answered with an error (HTTP ${e.code()})."
-        else -> "The server didn't answer like an Xtream server. Check the server address."
-    }
 
     suspend fun connectM3u(url: String, name: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            ApiClient.accountUserAgent = null
             val text = fetch(url.trim())
             val channels = M3uParser.parse(text)
             if (channels.isEmpty()) return@withContext Result.failure(IllegalStateException("No channels found in playlist"))
@@ -133,14 +158,16 @@ object Repository {
     suspend fun restore(saved: SavedAccount): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             clearCaches()
+            val ua = saved.userAgent.ifBlank { null }
+            ApiClient.accountUserAgent = ua
             if (saved.type == "xtream") {
                 val h = normalizeHost(saved.host)
                 api = ApiClient.xtream(h)
-                account = Account.Xtream(h, saved.user, saved.pass, saved.name)
+                account = Account.Xtream(h, saved.user, saved.pass, saved.name, ua)
             } else {
                 val text = fetch(saved.m3uUrl)
                 m3uChannels = M3uParser.parse(text)
-                account = Account.M3u(saved.m3uUrl, saved.name)
+                account = Account.M3u(saved.m3uUrl, saved.name, ua)
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -149,8 +176,8 @@ object Repository {
     }
 
     fun toSaved(): SavedAccount? = when (val a = account) {
-        is Account.Xtream -> SavedAccount(type = "xtream", name = a.name, host = a.host, user = a.user, pass = a.pass)
-        is Account.M3u -> SavedAccount(type = "m3u", name = a.name, m3uUrl = a.url)
+        is Account.Xtream -> SavedAccount(type = "xtream", name = a.name, host = a.host, user = a.user, pass = a.pass, userAgent = a.userAgent ?: "")
+        is Account.M3u -> SavedAccount(type = "m3u", name = a.name, m3uUrl = a.url, userAgent = a.userAgent ?: "")
         null -> null
     }
 

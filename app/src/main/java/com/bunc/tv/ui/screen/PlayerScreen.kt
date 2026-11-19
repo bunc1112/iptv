@@ -138,7 +138,7 @@ fun PlayerScreen(onBack: () -> Unit, onOpenGuide: () -> Unit) {
         // Providers often redirect (http -> https, or to another host); allow it and
         // use explicit timeouts so a dead connection is noticed instead of hanging.
         val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(com.bunc.tv.data.remote.ApiClient.userAgent)
+            .setUserAgent(com.bunc.tv.data.remote.ApiClient.currentUserAgent())
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(15_000)
