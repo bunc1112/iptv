@@ -54,6 +54,8 @@ object Repository {
     private fun normalizeHost(raw: String): String {
         var h = raw.trim()
         if (!h.startsWith("http://", true) && !h.startsWith("https://", true)) h = "http://$h"
+        // People sometimes paste a full API/playlist link; keep only scheme://host:port.
+        h = h.substringBefore("/player_api.php").substringBefore("/get.php").substringBefore("?")
         while (h.endsWith("/")) h = h.dropLast(1)
         return h
     }
@@ -65,19 +67,54 @@ object Repository {
             try {
                 val h = normalizeHost(host)
                 val service = ApiClient.xtream(h)
-                val auth = service.login(user, pass)
+                val auth = try {
+                    service.login(user, pass)
+                } catch (e: retrofit2.HttpException) {
+                    // No Xtream API here (e.g. 404): many providers still serve the playlist.
+                    return@withContext playlistFallback(h, user, pass, name, e)
+                } catch (e: com.google.gson.JsonParseException) {
+                    // Answered with something that isn't Xtream JSON (an HTML page, etc.).
+                    return@withContext playlistFallback(h, user, pass, name, e)
+                }
                 if (auth.userInfo?.auth == 1 || auth.userInfo?.status.equals("Active", true)) {
                     api = service
                     account = Account.Xtream(h, user, pass, name.ifBlank { user })
                     clearCaches()
                     Result.success(Unit)
                 } else {
-                    Result.failure(IllegalStateException("Login rejected by server"))
+                    Result.failure(IllegalStateException("The server rejected this username or password."))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
             }
         }
+
+    /** Xtream login failed: try the same server's M3U playlist (get.php) with the same login. */
+    private fun playlistFallback(host: String, user: String, pass: String, name: String, cause: Exception): Result<Unit> {
+        val url = "$host/get.php?username=${enc(user)}&password=${enc(pass)}&type=m3u_plus&output=ts"
+        return try {
+            val channels = M3uParser.parse(fetch(url))
+            if (channels.isEmpty()) {
+                Result.failure(IllegalStateException(xtreamFailureMessage(cause)))
+            } else {
+                m3uChannels = channels
+                account = Account.M3u(url, name.ifBlank { user })
+                clearCaches()
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(IllegalStateException(xtreamFailureMessage(cause)))
+        }
+    }
+
+    private fun xtreamFailureMessage(e: Exception): String = when {
+        e is retrofit2.HttpException && e.code() == 404 ->
+            "This server has no Xtream login (HTTP 404). Check the server address with your provider."
+        e is retrofit2.HttpException && (e.code() == 401 || e.code() == 403) ->
+            "The server refused access (HTTP ${e.code()}). Check your username and password."
+        e is retrofit2.HttpException -> "The server answered with an error (HTTP ${e.code()})."
+        else -> "The server didn't answer like an Xtream server. Check the server address."
+    }
 
     suspend fun connectM3u(url: String, name: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {

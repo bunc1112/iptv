@@ -13,6 +13,13 @@ import java.util.concurrent.TimeUnit
 
 object ApiClient {
 
+    /**
+     * Identify as a normal Android client (the system's own HTTP user agent) instead of
+     * "okhttp/x.y" — some IPTV panels answer library user agents with 403/404.
+     */
+    val userAgent: String =
+        System.getProperty("http.agent")?.takeIf { it.isNotBlank() } ?: "Dalvik/2.1.0 (Linux; U; Android)"
+
     private val http: OkHttpClient by lazy {
         // Load lots of channel/poster logos in parallel so grids fill fast.
         val dispatcher = okhttp3.Dispatcher().apply {
@@ -21,6 +28,13 @@ object ApiClient {
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
+            .addInterceptor { chain ->
+                val req = chain.request()
+                chain.proceed(
+                    if (req.header("User-Agent") == null) req.newBuilder().header("User-Agent", userAgent).build()
+                    else req
+                )
+            }
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
