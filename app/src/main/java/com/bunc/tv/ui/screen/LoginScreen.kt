@@ -37,6 +37,7 @@ import com.bunc.tv.ui.theme.BuncCyan
 import com.bunc.tv.ui.theme.BuncGold
 import com.bunc.tv.ui.theme.BuncNavy
 import com.bunc.tv.ui.theme.BuncNavyDeep
+import com.bunc.tv.ui.theme.BuncText
 import com.bunc.tv.ui.theme.BuncTextDim
 
 @Composable
