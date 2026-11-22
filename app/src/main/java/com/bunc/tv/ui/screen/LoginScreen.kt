@@ -53,10 +53,25 @@ fun LoginScreen(
     val rPass = remember { FocusRequester() }
     val rM3u = remember { FocusRequester() }
     val rConnect = remember { FocusRequester() }
+    val rPhone = remember { FocusRequester() }
 
     val xtream = vm.mode == "xtream"
     val lastFieldReq = if (xtream) rPass else rM3u
     var connectFocused by remember { mutableStateOf(false) }
+    var showPhone by remember { mutableStateOf(false) }
+
+    if (showPhone) {
+        PhoneLoginDialog(
+            onLogin = { l ->
+                showPhone = false
+                vm.mode = l.mode
+                if (l.name.isNotBlank()) vm.name = l.name
+                vm.host = l.host; vm.user = l.user; vm.pass = l.pass; vm.m3u = l.m3u
+                vm.connect(onConnected)
+            },
+            onDismiss = { showPhone = false }
+        )
+    }
 
     Box(
         modifier = Modifier.fillMaxSize().background(BuncNavyDeep).systemBarsPadding().imePadding(),
@@ -86,20 +101,27 @@ fun LoginScreen(
                     Modifier
                         .weight(1f)
                         .focusRequester(rTab)
-                        .focusProperties { down = rName }
+                        .focusProperties { down = rPhone }
                 ) { vm.mode = "xtream" }
                 ModeButton(
                     "M3U", !xtream,
                     Modifier
                         .weight(1f)
-                        .focusProperties { down = rName }
+                        .focusProperties { down = rPhone }
                 ) { vm.mode = "m3u" }
             }
+
+            Spacer(Modifier.height(12.dp))
+            PhoneButton(
+                Modifier
+                    .focusRequester(rPhone)
+                    .focusProperties { up = rTab; down = rName }
+            ) { showPhone = true }
 
             Spacer(Modifier.height(16.dp))
 
             Field(vm.name, { vm.name = it }, "Profile name (optional)",
-                self = rName, up = rTab, down = if (xtream) rHost else rM3u)
+                self = rName, up = rPhone, down = if (xtream) rHost else rM3u)
 
             if (xtream) {
                 Field(vm.host, { vm.host = it }, "Server URL (http://host:port)",
@@ -213,4 +235,22 @@ private fun Field(
             focusedLabelColor = BuncGold
         )
     )
+}
+
+@Composable
+private fun PhoneButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    Button(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .onFocusChanged { focused = it.isFocused },
+        shape = RoundedCornerShape(10.dp),
+        border = if (focused) BorderStroke(3.dp, BuncGold) else null,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (focused) BuncCyan else BuncNavy,
+            contentColor = if (focused) BuncNavyDeep else BuncText
+        )
+    ) { Text("📱  Log in with phone (scan QR code)") }
 }

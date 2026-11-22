@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -54,6 +55,22 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
     ) {
         item {
             Text("Settings", color = BuncText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Text("App", color = BuncTextDim, fontSize = 15.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Version ${com.bunc.tv.data.Updater.currentVersion}", color = BuncText, fontSize = 14.sp)
+                Spacer(Modifier.width(6.dp))
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                Chip("Check for updates", false) {
+                    scope.launch { com.bunc.tv.data.Updater.check(manual = true) }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
             Text("Folder order", color = BuncTextDim, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
         }
 

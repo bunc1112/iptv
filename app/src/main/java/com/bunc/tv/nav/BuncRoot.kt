@@ -40,6 +40,10 @@ fun BuncRoot() {
     val nav = rememberNavController()
     var start by remember { mutableStateOf<String?>(null) }
 
+    // Look for a newer Bunc on GitHub once per start; the dialog appears only if one exists.
+    LaunchedEffect(Unit) { com.bunc.tv.data.Updater.autoCheck() }
+    com.bunc.tv.ui.screen.UpdateDialog()
+
     LaunchedEffect(Unit) {
         // Profiles exist → show the picker; none yet → go straight to login.
         start = if (ServiceLocator.prefs.loadProfiles().isNotEmpty()) Routes.PROFILES else Routes.LOGIN
