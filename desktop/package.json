@@ -1,0 +1,63 @@
+{
+  "name": "bunc",
+  "productName": "Bunc",
+  "version": "1.0.0",
+  "description": "Bunc IPTV player for Windows",
+  "main": "main.js",
+  "author": "Bunc",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.3.9",
+    "hls.js": "1.5.17",
+    "mpegts.js": "1.7.3"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.bunc.desktop",
+    "productName": "Bunc",
+    "artifactName": "Bunc-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Bunc"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "bunc1112",
+        "repo": "iptv"
+      }
+    ]
+  }
+}

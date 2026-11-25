@@ -81,3 +81,34 @@ jobs:
             Download the APK below and sideload it (enable "unknown sources").
           files: ${{ env.APK_FILE }}
           make_latest: true
+
+  windows:
+    # Builds the Windows installer and adds it to the release the Android job created.
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Windows installer
+        working-directory: desktop
+        shell: bash
+        run: |
+          npm pkg set version="1.0.${{ github.run_number }}"
+          npm install --no-audit --no-fund
+          npx electron-builder --win nsis --x64 --publish never
+
+      - name: Add installer to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v1.0.${{ github.run_number }}"
+          files: |
+            desktop/dist/Bunc-Setup-*.exe
+            desktop/dist/Bunc-Setup-*.exe.blockmap
+            desktop/dist/latest.yml
+          fail_on_unmatched_files: true

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Bunc</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Player (full window) -->
+  <div id="player" class="hidden">
+    <video id="video" playsinline></video>
+    <div id="pl-spinner" class="spinner hidden"></div>
+    <div id="pl-status" class="pl-status hidden"></div>
+    <div id="pl-info" class="pl-info hidden"></div>
+    <div id="pl-bar" class="pl-bar hidden">
+      <button data-act="back" title="Back (Esc)">‹ Back</button>
+      <button data-act="prev" title="Previous channel (↑ / PgUp)">▲ Prev</button>
+      <button data-act="next" title="Next channel (↓ / PgDn)">▼ Next</button>
+      <button data-act="info" title="Now / next (I)">Info</button>
+      <button data-act="guide" title="TV guide (G)">TV Guide</button>
+      <span class="grow"></span>
+      <button data-act="mute" title="Mute (M)">🔊</button>
+      <input id="pl-vol" type="range" min="0" max="1" step="0.05" value="1" title="Volume">
+      <button data-act="fs" title="Fullscreen (F)">⛶ Fullscreen</button>
+    </div>
+  </div>
+
+  <div id="update-banner" class="update hidden"></div>
+
+  <script src="../node_modules/mpegts.js/dist/mpegts.js"></script>
+  <script src="../node_modules/hls.js/dist/hls.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
